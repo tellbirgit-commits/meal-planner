@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isMember(householdId) {
+      return isAuthenticated() && 
+        request.auth.uid in get(/databases/$(database)/documents/households/$(householdId)).data.members;
+    }
+
+    function isValidHousehold(data) {
+      return data.keys().hasAll(['name', 'ownerId', 'members']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.ownerId == request.auth.uid &&
+             data.members is list && data.members.size() > 0 && data.members.size() < 10 &&
+             request.auth.uid in data.members;
+    }
+
+    function isValidMeal(data) {
+      return data.keys().hasAll(['date', 'type', 'name', 'updatedBy', 'updatedAt']) &&
+             data.date is string && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$') &&
+             data.type in ['lunch', 'dinner'] &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             data.updatedBy == request.auth.uid;
+    }
+
+    // Households
+    match /households/{householdId} {
+      allow read: if isAuthenticated() && (request.auth.uid in resource.data.members);
+      allow create: if isAuthenticated() && isValidHousehold(request.resource.data);
+      allow update: if isAuthenticated() && 
+                    (request.auth.uid in resource.data.members) && 
+                    isValidHousehold(request.resource.data);
+      
+      // Meals Subcollection
+      match /meals/{mealId} {
+        allow read: if isMember(householdId);
+        allow write: if isMember(householdId) && isValidMeal(request.resource.data);
+      }
+    }
+  }
+}

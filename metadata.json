@@ -1,0 +1,5 @@
+{
+  "name": "Meal Planner & 14-Day Validator",
+  "description": "A minimalist meal planning tool with a 14-day duplicate prevention rule and 60-day calendar view.",
+  "requestFramePermissions": []
+}

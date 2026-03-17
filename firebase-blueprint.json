@@ -1,0 +1,66 @@
+{
+  "entities": {
+    "Household": {
+      "title": "Household",
+      "description": "A group of users sharing a meal plan.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the household."
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "UID of the user who created the household."
+        },
+        "members": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of user UIDs who are members of this household."
+        }
+      },
+      "required": ["name", "ownerId", "members"]
+    },
+    "Meal": {
+      "title": "Meal",
+      "description": "A planned meal entry.",
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "format": "date",
+          "description": "ISO date string YYYY-MM-DD."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["lunch", "dinner"],
+          "description": "Type of meal."
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the meal."
+        },
+        "updatedBy": {
+          "type": "string",
+          "description": "UID of the user who last updated this meal."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of the last update."
+        }
+      },
+      "required": ["date", "type", "name", "updatedBy", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/households/{householdId}": {
+      "schema": "Household",
+      "description": "Collection of households."
+    },
+    "/households/{householdId}/meals/{mealId}": {
+      "schema": "Meal",
+      "description": "Meals planned for a specific household."
+    }
+  }
+}
