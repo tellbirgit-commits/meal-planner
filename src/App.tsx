@@ -23,7 +23,13 @@ import {
   Moon,
   AlertTriangle,
   ShoppingCart,
-  Info
+  Info,
+  Link as LinkIcon,
+  Menu,
+  History as HistoryIcon,
+  Archive as ArchiveIcon,
+  LayoutDashboard,
+  Search
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
@@ -148,8 +154,8 @@ export default function App() {
   const [newPantryItem, setNewPantryItem] = useState('');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedType, setSelectedType] = useState<MealType>('dinner');
-  const [warning, setWarning] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [warning, setWarning] = useState<React.ReactNode>(null);
+  const [success, setSuccess] = useState<React.ReactNode>(null);
   const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
   const [shoppingList, setShoppingList] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -158,6 +164,8 @@ export default function App() {
   const [showRecipe, setShowRecipe] = useState<MealEntry | null>(null);
   const [recipeContent, setRecipeContent] = useState<string | null>(null);
   const [isGeneratingRecipe, setIsGeneratingRecipe] = useState(false);
+  const [showRecipeUrlModal, setShowRecipeUrlModal] = useState<MealEntry | null>(null);
+  const [recipeUrlInput, setRecipeUrlInput] = useState('');
   const [conflictAlternatives, setConflictAlternatives] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(true);
 
@@ -166,9 +174,230 @@ export default function App() {
   const [showHouseholdModal, setShowHouseholdModal] = useState<'create' | 'join' | null>(null);
   const [showInviteForm, setShowInviteForm] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
+  const [showDataInspector, setShowDataInspector] = useState(false);
+  const [activeConflictId, setActiveConflictId] = useState<string | null>(null);
+  const [activeDropTarget, setActiveDropTarget] = useState<{ date: string, type: MealType } | null>(null);
+  const [currentView, setCurrentView] = useState<'planner' | 'archive'>('planner');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const days = useMemo(() => getDaysArray(60), []);
   const ai = useMemo(() => new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }), []);
+
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const query = searchQuery.toLowerCase().trim();
+    return meals
+      .filter(m => m.name.toLowerCase().includes(query))
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }, [meals, searchQuery]);
+
+  const ArchiveView = () => {
+    const uniqueMeals = useMemo(() => {
+      const mealMap = new Map<string, MealEntry>();
+      meals.forEach(m => {
+        const name = m.name.trim();
+        if (name) {
+          const existing = mealMap.get(name);
+          // Prefer entries with recipeUrl, then more recent ones
+          if (!existing || (!existing.recipeUrl && m.recipeUrl) || (m.date > existing.date)) {
+            mealMap.set(name, m);
+          }
+        }
+      });
+      return Array.from(mealMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+    }, [meals]);
+
+    const history = useMemo(() => {
+      const today = new Date().toISOString().split('T')[0];
+      return meals
+        .filter(m => m.date < today)
+        .sort((a, b) => b.date.localeCompare(a.date));
+    }, [meals]);
+
+    return (
+      <div className="space-y-12 pb-20">
+        {/* Search Bar */}
+        <section className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+          <div className="relative group">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-indigo-500 transition-colors" size={20} />
+            <input 
+              type="text" 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search for a meal (e.g. Pasta, Curry...)"
+              className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-xl focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all font-medium"
+            />
+          </div>
+        </section>
+
+        {searchQuery.trim() && (
+          <section>
+            <div className="flex items-center gap-3 mb-6">
+              <Search className="text-indigo-500" />
+              <h2 className="text-2xl font-bold text-slate-900">Search Results</h2>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+              <div className="divide-y divide-slate-50">
+                {searchResults.map(meal => (
+                  <div key={meal.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-bold text-slate-900">{meal.name}</p>
+                        <div className="flex items-center gap-1">
+                          <button 
+                            onClick={() => getRecipe(meal)}
+                            className="p-1 text-slate-400 hover:text-indigo-500 transition-all"
+                            title="AI Recipe"
+                          >
+                            <Info size={14} />
+                          </button>
+                          {meal.recipeUrl && (
+                            <a 
+                              href={meal.recipeUrl} 
+                              target="_blank" 
+                              rel="noopener noreferrer nofollow"
+                              className="p-1 text-emerald-500 hover:text-emerald-600 transition-all"
+                              title="Open Recipe Link"
+                            >
+                              <LinkIcon size={14} />
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        {formatDate(meal.date)} • {meal.type}
+                      </p>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        setNewMealName(meal.name);
+                        setCurrentView('planner');
+                        setSearchQuery('');
+                      }}
+                      className="p-2 text-emerald-500 hover:bg-emerald-50 rounded-lg transition-colors flex items-center gap-2 text-xs font-bold uppercase tracking-wider"
+                    >
+                      <Plus size={16} />
+                      Plan Again
+                    </button>
+                  </div>
+                ))}
+                {searchResults.length === 0 && (
+                  <p className="p-12 text-center text-slate-400 italic">No matches found for "{searchQuery}"</p>
+                )}
+              </div>
+            </div>
+          </section>
+        )}
+
+        <section>
+          <div className="flex items-center gap-3 mb-6">
+            <ArchiveIcon className="text-emerald-500" />
+            <h2 className="text-2xl font-bold text-slate-900">Meal Archive</h2>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+            {uniqueMeals.map(meal => (
+              <div key={meal.name} className="p-4 bg-white rounded-xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow group relative">
+                <div className="mb-2">
+                  <p className="text-sm font-medium text-slate-700 line-clamp-2">{meal.name}</p>
+                </div>
+                
+                <div className="flex items-center gap-2 mt-auto">
+                  <button 
+                    onClick={() => getRecipe(meal)}
+                    className="p-1 text-slate-300 hover:text-indigo-500 transition-all"
+                    title="AI Recipe"
+                  >
+                    <Info size={14} />
+                  </button>
+                  {meal.recipeUrl && (
+                    <a 
+                      href={meal.recipeUrl} 
+                      target="_blank" 
+                      rel="noopener noreferrer nofollow"
+                      className="p-1 text-emerald-400 hover:text-emerald-600 transition-all"
+                      title="Open Recipe Link"
+                    >
+                      <LinkIcon size={14} />
+                    </a>
+                  )}
+                  <button 
+                    onClick={() => {
+                      setNewMealName(meal.name);
+                      setCurrentView('planner');
+                    }}
+                    className="ml-auto p-1.5 bg-emerald-50 text-emerald-600 rounded-md opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="Plan this meal"
+                  >
+                    <Plus size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
+            {uniqueMeals.length === 0 && (
+              <p className="text-slate-400 italic col-span-full py-8 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200">No meals archived yet.</p>
+            )}
+          </div>
+        </section>
+
+        <section>
+          <div className="flex items-center gap-3 mb-6">
+            <HistoryIcon className="text-indigo-500" />
+            <h2 className="text-2xl font-bold text-slate-900">Meal History</h2>
+          </div>
+          <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+            <div className="divide-y divide-slate-50">
+              {history.map(meal => (
+                <div key={meal.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-bold text-slate-900">{meal.name}</p>
+                      <div className="flex items-center gap-1">
+                        <button 
+                          onClick={() => getRecipe(meal)}
+                          className="p-1 text-slate-400 hover:text-indigo-500 transition-all"
+                          title="AI Recipe"
+                        >
+                          <Info size={14} />
+                        </button>
+                        {meal.recipeUrl && (
+                          <a 
+                            href={meal.recipeUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer nofollow"
+                            className="p-1 text-emerald-500 hover:text-emerald-600 transition-all"
+                            title="Open Recipe Link"
+                          >
+                            <LinkIcon size={14} />
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                      {formatDate(meal.date)} • {meal.type}
+                    </p>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setNewMealName(meal.name);
+                      setCurrentView('planner');
+                    }}
+                    className="p-2 text-emerald-500 hover:bg-emerald-50 rounded-lg transition-colors flex items-center gap-2 text-xs font-bold uppercase tracking-wider"
+                  >
+                    <Plus size={16} />
+                    Plan Again
+                  </button>
+                </div>
+              ))}
+              {history.length === 0 && (
+                <p className="p-12 text-center text-slate-400 italic">No previous meals found in your history.</p>
+              )}
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  };
 
   // Connection Test
   useEffect(() => {
@@ -237,6 +466,7 @@ export default function App() {
     if (!householdId || !user) return;
     
     const unsubscribe = onSnapshot(doc(db, 'households', householdId), (snapshot) => {
+      console.log("onSnapshot households fired, exists:", snapshot.exists());
       if (snapshot.exists()) {
         const data = snapshot.data();
         setHouseholdName(data.name);
@@ -244,6 +474,7 @@ export default function App() {
           setPantry(data.pantry);
         }
       } else {
+        console.log("Household does not exist, setting householdId to null");
         setHouseholdId(null);
         localStorage.removeItem('meal-planner-household-id');
       }
@@ -258,19 +489,38 @@ export default function App() {
     return () => unsubscribe();
   }, [householdId, user]);
 
+  // Automatic Duplicate Detection
+  useEffect(() => {
+    if (meals.length === 0) return;
+    const seen = new Set<string>();
+    const duplicates: string[] = [];
+    meals.forEach(m => {
+      const key = `${m.date}_${m.type}`;
+      if (seen.has(key)) {
+        duplicates.push(m.id);
+      } else {
+        seen.add(key);
+      }
+    });
+    if (duplicates.length > 0) {
+      setWarning(`Data Inconsistency: Found ${duplicates.length} duplicate entries. Please click "Repair Meal Plan Data" at the top to fix.`);
+    }
+  }, [meals]);
+
   // Meals Listener (Real-time Sync)
   useEffect(() => {
+    console.log("Meals listener useEffect running, householdId:", householdId, "user:", user ? user.uid : 'null');
     if (!householdId) {
       // Fallback to local storage or prefilled data if not in a household
       const saved = localStorage.getItem('meal-planner-local-meals');
       if (saved) {
         try {
-          setMeals(JSON.parse(saved));
+          setMeals(prev => JSON.parse(saved));
         } catch (e) {
-          setMeals(PREFILLED_MEALS);
+          setMeals(prev => PREFILLED_MEALS);
         }
       } else {
-        setMeals(PREFILLED_MEALS);
+        setMeals(prev => PREFILLED_MEALS);
       }
       setIsLoading(false);
       return;
@@ -280,15 +530,24 @@ export default function App() {
 
     const q = collection(db, 'households', householdId, 'meals');
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      console.log("onSnapshot meals fired, docs count:", snapshot.docs.length);
       const mealData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       })) as MealEntry[];
-      setMeals(mealData);
+      
+      const updatedMeal = mealData.find(m => m.id === '2026-03-24_dinner');
+      console.log("onSnapshot meals fired, updatedMeal:", updatedMeal);
+      
+      setMeals(prev => mealData);
     });
 
     return () => unsubscribe();
   }, [householdId, user]);
+
+  useEffect(() => {
+    console.log("Meals state updated:", meals);
+  }, [meals]);
 
   // Auto-discover household if not set
   useEffect(() => {
@@ -416,18 +675,8 @@ export default function App() {
     e.dataTransfer.dropEffect = 'move';
   };
 
-  const onDrop = async (e: React.DragEvent, targetDate: string, targetType: MealType) => {
-    e.preventDefault();
-    const mealId = e.dataTransfer.getData('mealId');
-    const pantryItem = e.dataTransfer.getData('pantryItem');
-
-    if (pantryItem) {
-      handleInlineEdit(targetDate, targetType, pantryItem);
-      return;
-    }
-
+  const handleMove = async (mealId: string, targetDate: string, targetType: MealType) => {
     const meal = meals.find(m => m.id === mealId);
-    
     if (!meal) return;
     if (meal.date === targetDate && meal.type === targetType) return;
 
@@ -464,7 +713,6 @@ export default function App() {
       setMeals(updatedMeals);
       localStorage.setItem('meal-planner-local-meals', JSON.stringify(updatedMeals));
     } else {
-      // Shared mode
       try {
         const batch = writeBatch(db);
         
@@ -475,7 +723,8 @@ export default function App() {
           type: targetType,
           name: meal.name,
           updatedBy: user.uid,
-          updatedAt: new Date().toISOString()
+          updatedAt: new Date().toISOString(),
+          recipeUrl: meal.recipeUrl || null
         });
 
         // 2. If target had a meal, move it to source. Otherwise delete source.
@@ -486,7 +735,8 @@ export default function App() {
             type: meal.type,
             name: existingAtTarget.name,
             updatedBy: user.uid,
-            updatedAt: new Date().toISOString()
+            updatedAt: new Date().toISOString(),
+            recipeUrl: existingAtTarget.recipeUrl || null
           });
         } else {
           // No meal at target, so just delete the source
@@ -501,13 +751,82 @@ export default function App() {
     setDraggedMeal(null);
   };
 
+  const onDrop = async (e: React.DragEvent, targetDate: string, targetType: MealType) => {
+    e.preventDefault();
+    const mealId = e.dataTransfer.getData('mealId');
+    const pantryItem = e.dataTransfer.getData('pantryItem');
+
+    if (pantryItem) {
+      handleInlineEdit(targetDate, targetType, pantryItem);
+      return;
+    }
+
+    if (mealId) {
+      handleMove(mealId, targetDate, targetType);
+    }
+  };
+
+  const handleTouchDrag = (e: any, info: any) => {
+    const { x, y } = info.point;
+    const element = document.elementFromPoint(x, y);
+    const dropTarget = element?.closest('[data-drop-target]');
+    
+    if (dropTarget) {
+      const date = dropTarget.getAttribute('data-date');
+      const type = dropTarget.getAttribute('data-type') as MealType;
+      if (date && type) {
+        setActiveDropTarget({ date, type });
+      } else {
+        setActiveDropTarget(null);
+      }
+    } else {
+      setActiveDropTarget(null);
+    }
+  };
+
+  const handleTouchDragEnd = (e: any, info: any, mealId: string) => {
+    const { x, y } = info.point;
+    
+    // Hide the dragged element briefly to ensure we get the element behind it
+    const elements = document.elementsFromPoint(x, y);
+    const dropTarget = elements.find(el => el.closest('[data-drop-target]'))?.closest('[data-drop-target]');
+    
+    if (dropTarget) {
+      const date = dropTarget.getAttribute('data-date');
+      const type = dropTarget.getAttribute('data-type') as MealType;
+      if (date && type) {
+        handleMove(mealId, date, type);
+      }
+    }
+    setDraggedMeal(null);
+    setActiveDropTarget(null);
+  };
+
+  const handleTouchDragEndPantry = (e: any, info: any, itemName: string) => {
+    const { x, y } = info.point;
+    
+    const elements = document.elementsFromPoint(x, y);
+    const dropTarget = elements.find(el => el.closest('[data-drop-target]'))?.closest('[data-drop-target]');
+    
+    if (dropTarget) {
+      const date = dropTarget.getAttribute('data-date');
+      const type = dropTarget.getAttribute('data-type') as MealType;
+      if (date && type) {
+        handleInlineEdit(date, type, itemName);
+      }
+    }
+    setActiveDropTarget(null);
+  };
+
   const getAiSuggestions = async () => {
     if (pantry.length === 0) return;
     setIsGenerating(true);
     try {
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: `Based on these pantry items: ${pantry.join(', ')}, suggest 3 simple meal names. Return ONLY a JSON array of strings.`,
+        contents: `Based on these pantry items: ${pantry.join(', ')}, suggest 3 simple meal names. 
+                   IMPORTANT: Do NOT include lentils (läätsed), peanuts, olives, or capers in any suggestions.
+                   Return ONLY a JSON array of strings. Be concise.`,
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -547,6 +866,7 @@ export default function App() {
         contents: `I have planned these meals for the next week: ${mealList}. 
                    My pantry already contains: ${pantryList}. 
                    What ingredients do I need to buy? 
+                   IMPORTANT: Do NOT include lentils (läätsed), peanuts, olives, or capers in the shopping list.
                    Return ONLY a JSON array of strings. Be concise.`,
         config: {
           responseMimeType: "application/json",
@@ -577,6 +897,7 @@ export default function App() {
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: `Provide a very brief recipe and ingredients list for "${meal.name}". 
+                   IMPORTANT: Do NOT include lentils (läätsed), peanuts, olives, or capers in the recipe or ingredients.
                    Keep it under 150 words. Use Markdown for formatting.`,
         config: {
           thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }
@@ -591,25 +912,89 @@ export default function App() {
     }
   };
 
-  const getAlternative = async (meal: { name: string, date: string, type: MealType }, forceNew = false) => {
+  const [isFetchingAlternative, setIsFetchingAlternative] = useState<Record<string, boolean>>({});
+
+  const getAlternative = async (meal: { name: string, date: string, type: MealType }, forceNew = false, retries = 3) => {
+    console.log("getAlternative called", meal, forceNew);
     const key = `${meal.date}_${meal.type}`;
-    if (!forceNew && conflictAlternatives[key] || !meal.name.trim()) return;
+    const currentAlternative = conflictAlternatives[key];
+    
+    if ((!forceNew && currentAlternative) || !meal.name.trim()) {
+      return;
+    }
+
+    setIsFetchingAlternative(prev => ({ ...prev, [key]: true }));
+    
+    // Pre-calculate forbidden meals (those that would cause a 14-day conflict)
+    const targetDate = new Date(meal.date);
+    const forbiddenMeals = Array.from(new Set(
+      meals
+        .filter(m => {
+          const mDate = new Date(m.date);
+          const diffDays = Math.round(Math.abs(targetDate.getTime() - mDate.getTime()) / (1000 * 60 * 60 * 24));
+          return diffDays < 14 && m.name.toLowerCase() !== 'jäägid';
+        })
+        .map(m => m.name.toLowerCase())
+    ));
 
     try {
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `The user planned "${meal.name}" for ${meal.type} on ${meal.date}, but they already had it recently. 
-                   Suggest ONE alternative meal name that is different but suitable for ${meal.type}. 
-                   Consider these pantry items: ${pantry.join(', ')}.
-                   Return ONLY the meal name string. Be creative but simple.`,
-        config: {
-          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }
+      let attempts = 0;
+      let lastSuggestion = currentAlternative;
+
+      while (attempts < retries) {
+        attempts++;
+        try {
+          console.log(`Fetching alternative from AI (attempt ${attempts})...`);
+          const response = await ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: `The user planned "${meal.name}" for ${meal.type} on ${meal.date}, but they already had it recently. 
+                       Suggest ONE alternative meal name that is different but suitable for ${meal.type}. 
+                       Consider these pantry items: ${pantry.join(', ')}.
+                       PRIORITIZE reusing meals already in their plan if they are suitable: ${meals.map(m => m.name).join(', ')}.
+                       
+                       CRITICAL RULES:
+                       1. The suggestion MUST NOT be in this forbidden list (already had within 14 days): ${forbiddenMeals.join(', ')}.
+                       2. The suggestion MUST NOT be "${meal.name}".
+                       ${lastSuggestion ? `3. The suggestion MUST NOT be "${lastSuggestion}".` : ''}
+                       4. Do NOT include lentils (läätsed), peanuts, olives, or capers.
+                       
+                       Return ONLY the meal name string. Be creative but simple.`,
+            config: {
+              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }
+            }
+          });
+
+          const alternative = response.text.trim().replace(/^"|"$/g, '');
+          console.log("AI suggested:", alternative);
+
+          // Client-side validation
+          const violation = getViolation({ id: 'temp', name: alternative, date: meal.date, type: meal.type });
+          if (!violation) {
+            console.log("Alternative is valid!");
+            setConflictAlternatives(prev => ({ ...prev, [key]: alternative }));
+            return;
+          } else {
+            console.warn("AI suggested a conflicting meal:", alternative, "Conflict with:", violation.name, "on", violation.date);
+            lastSuggestion = alternative;
+            // Continue to next attempt
+          }
+        } catch (error: any) {
+          const errorObj = typeof error === 'string' ? JSON.parse(error) : error;
+          const statusCode = errorObj?.error?.code || errorObj?.status;
+          
+          if (statusCode === 429 && attempts < retries) {
+            const delay = Math.pow(2, attempts) * 1000;
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          throw error;
         }
-      });
-      const alternative = response.text.trim().replace(/^"|"$/g, '');
-      setConflictAlternatives(prev => ({ ...prev, [key]: alternative }));
+      }
+      console.error("Failed to find a conflict-free alternative after", retries, "attempts.");
     } catch (error) {
       console.error("Alternative Error:", error);
+    } finally {
+      setIsFetchingAlternative(prev => ({ ...prev, [key]: false }));
     }
   };
 
@@ -629,22 +1014,17 @@ export default function App() {
       if (diffDays >= 14) return false;
 
       // Leftover Exception:
-      // If current is lunch and it was planned on the PREVIOUS day, it's a leftover.
       const isCurrentLunch = meal.type === 'lunch';
-      const isNextDay = diffTime === (1000 * 60 * 60 * 24); // Exactly 1 day later
+      const isNextDay = diffTime === (1000 * 60 * 60 * 24);
       
-      if (isCurrentLunch && isNextDay) {
-        return false;
-      }
+      if (isCurrentLunch && isNextDay) return false;
 
-      // Reverse Leftover Exception (if we are looking at the previous day's meal and the next day's lunch is already planned)
       const isConflictLunch = m.type === 'lunch';
-      const isPrevDay = diffTime === -(1000 * 60 * 60 * 24); // Exactly 1 day earlier
+      const isPrevDay = diffTime === -(1000 * 60 * 60 * 24);
 
-      if (isConflictLunch && isPrevDay) {
-        return false;
-      }
+      if (isConflictLunch && isPrevDay) return false;
 
+      console.log(`Conflict detected for "${meal.name}" on ${meal.date} with meal ID: ${m.id} on ${m.date}`);
       return true;
     });
   };
@@ -691,7 +1071,7 @@ export default function App() {
           updatedMeals = [...meals, { id, date: selectedDate, type: selectedType, name: name.trim() }];
         }
         
-        setMeals(updatedMeals);
+        setMeals(prev => updatedMeals);
         localStorage.setItem('meal-planner-local-meals', JSON.stringify(updatedMeals));
         setSuccess(`Planned ${selectedType} "${name}" (Local only)`);
       } else {
@@ -717,38 +1097,76 @@ export default function App() {
   };
 
   const handleInlineEdit = async (date: string, type: MealType, newName: string) => {
+    console.log("handleInlineEdit called", date, type, newName);
+    if (newName === undefined) {
+      console.log("handleInlineEdit: newName is undefined, returning");
+      return;
+    }
+    if (!newName) {
+      console.log("handleInlineEdit: newName is empty, deleting meal");
+    }
     if (!householdId || !user) {
       // Local mode inline edit
-      const existingMeal = meals.find(m => m.date === date && m.type === type);
-      
-      if (!newName) {
-        if (existingMeal) {
-          const updatedMeals = meals.filter(m => m.id !== existingMeal.id);
-          setMeals(updatedMeals);
-          localStorage.setItem('meal-planner-local-meals', JSON.stringify(updatedMeals));
+      setMeals(prev => {
+        const existingMeal = prev.find(m => m.date === date && m.type === type);
+        console.log("Local mode, existingMeal:", existingMeal);
+        
+        if (!newName) {
+          if (existingMeal) {
+            return prev.filter(m => m.id !== existingMeal.id);
+          }
+          return prev;
         }
-        return;
-      }
 
-    // We still validate to show the warning, but we don't block the edit anymore
-    // This allows users to type through temporary states (like deleting a letter and adding it back)
-    validateMeal(newName, date, type, existingMeal?.id);
+        // We still validate to show the warning, but we don't block the edit anymore
+        const isValid = validateMeal(newName, date, type, existingMeal?.id);
+        if (isValid) setWarning(null);
 
-    let updatedMeals;
-    if (existingMeal) {
-      updatedMeals = meals.map(m => m.id === existingMeal.id ? { ...m, name: newName } : m);
-    } else {
-      updatedMeals = [...meals, { id: `${date}_${type}`, date, type, name: newName }];
+        // Clear conflict alternative
+        setConflictAlternatives(altPrev => {
+          const next = { ...altPrev };
+          delete next[`${date}_${type}`];
+          return next;
+        });
+
+        if (existingMeal) {
+          return prev.map(m => m.id === existingMeal.id ? { ...m, name: newName } : m);
+        } else {
+          return [...prev, { id: `${date}_${type}`, date, type, name: newName }];
+        }
+      });
+      
+      // Update localStorage after state change (using a side effect or just calculating here)
+      // For simplicity in local mode, we'll just use the functional update and a separate effect handles sync if needed, 
+      // but here we'll just do a quick sync.
+      setTimeout(() => {
+        setMeals(currentMeals => {
+          localStorage.setItem('meal-planner-local-meals', JSON.stringify(currentMeals));
+          return currentMeals;
+        });
+      }, 0);
+      
+      console.log("Local mode, meals update triggered");
+      return;
     }
-    setMeals(updatedMeals);
-    localStorage.setItem('meal-planner-local-meals', JSON.stringify(updatedMeals));
-    return;
-  }
   
-  const mealId = `${date}_${type}`;
+  const allMatches = meals.filter(m => m.date === date && m.type === type);
+  const existingMeal = allMatches[0];
+  const mealId = existingMeal?.id || `${date}_${type}`;
+  
+  console.log("Firestore mode, mealId:", mealId, "matches found:", allMatches.length);
+  
   if (!newName) {
     try {
-      await deleteDoc(doc(db, 'households', householdId, 'meals', mealId));
+      // Delete all matches to be thorough
+      for (const m of allMatches) {
+        await deleteDoc(doc(db, 'households', householdId, 'meals', m.id));
+      }
+      // Also try to delete the standard ID just in case
+      if (!allMatches.find(m => m.id === mealId)) {
+        await deleteDoc(doc(db, 'households', householdId, 'meals', mealId));
+      }
+      console.log("Firestore mode, meal(s) deleted");
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `households/${householdId}/meals/${mealId}`);
     }
@@ -756,25 +1174,61 @@ export default function App() {
   }
 
   // Show warning but don't block the write
-  validateMeal(newName, date, type, mealId);
+  const isValid = validateMeal(newName, date, type, mealId);
+  if (isValid) setWarning(null);
+
+  // Clear conflict alternative
+  setConflictAlternatives(prev => {
+    const next = { ...prev };
+    delete next[`${date}_${type}`];
+    return next;
+  });
+
+  // Optimistic update
+  console.log("Optimistic update for mealId:", mealId, "newName:", newName);
+  setMeals(prev => {
+    // Remove all old matches and add the new one
+    const filtered = prev.filter(m => !(m.date === date && m.type === type));
+    return [...filtered, { id: mealId, date, type, name: newName, recipeUrl: existingMeal?.recipeUrl }];
+  });
 
   try {
-    await setDoc(doc(db, 'households', householdId, 'meals', mealId), {
+    // 1. Clean up other duplicates first if they exist
+    if (allMatches.length > 1) {
+      console.log("Cleaning up duplicates before update...");
+      for (let i = 1; i < allMatches.length; i++) {
+        await deleteDoc(doc(db, 'households', householdId, 'meals', allMatches[i].id));
+      }
+    }
+
+    // 2. Update the primary one
+    console.log("Calling setDoc for mealId:", mealId);
+    const mealData: any = {
       date,
       type,
       name: newName,
       updatedBy: user.uid,
       updatedAt: new Date().toISOString()
-    });
+    };
+    if (existingMeal?.recipeUrl) {
+      mealData.recipeUrl = existingMeal.recipeUrl;
+    }
+    await setDoc(doc(db, 'households', householdId, 'meals', mealId), mealData);
+    
+    console.log("Firestore mode, meal saved successfully");
+    setSuccess(`Updated to ${newName}`);
+    setTimeout(() => setSuccess(null), 2000);
   } catch (error) {
+    console.error("Firestore write error:", error);
     handleFirestoreError(error, OperationType.WRITE, `households/${householdId}/meals/${mealId}`);
+    setWarning("Failed to save change. Reverting...");
   }
 };
 
   const handleRemoveMeal = async (id: string) => {
     if (!householdId || !user) {
       const updatedMeals = meals.filter(m => m.id !== id);
-      setMeals(updatedMeals);
+      setMeals(prev => updatedMeals);
       localStorage.setItem('meal-planner-local-meals', JSON.stringify(updatedMeals));
     } else {
       try {
@@ -782,6 +1236,47 @@ export default function App() {
       } catch (error) {
         handleFirestoreError(error, OperationType.DELETE, `households/${householdId}/meals/${id}`);
       }
+    }
+  };
+
+  const handleUpdateRecipeUrl = async () => {
+    if (!showRecipeUrlModal || !householdId || !user) return;
+    
+    const mealId = showRecipeUrlModal.id;
+    const url = recipeUrlInput.trim();
+
+    // Optimistic update
+    setMeals(prev => prev.map(m => m.id === mealId ? { ...m, recipeUrl: url || undefined } : m));
+
+    try {
+      if (url) {
+        await updateDoc(doc(db, 'households', householdId, 'meals', mealId), {
+          recipeUrl: url,
+          updatedBy: user.uid,
+          updatedAt: new Date().toISOString()
+        });
+      } else {
+        // Remove field if empty
+        const mealRef = doc(db, 'households', householdId, 'meals', mealId);
+        const mealDoc = await getDoc(mealRef);
+        if (mealDoc.exists()) {
+          const data = mealDoc.data();
+          delete data.recipeUrl;
+          await setDoc(mealRef, {
+            ...data,
+            updatedBy: user.uid,
+            updatedAt: new Date().toISOString()
+          });
+        }
+      }
+      setSuccess("Recipe URL updated!");
+      setShowRecipeUrlModal(null);
+      setRecipeUrlInput('');
+      setTimeout(() => setSuccess(null), 2000);
+    } catch (error) {
+      console.error("Error updating recipe URL:", error);
+      handleFirestoreError(error, OperationType.UPDATE, `households/${householdId}/meals/${mealId}`);
+      setWarning("Failed to update recipe URL.");
     }
   };
 
@@ -798,6 +1293,30 @@ export default function App() {
     setPantry(pantry.filter(i => i !== item));
   };
 
+  const handleLogin = async () => {
+    try {
+      console.log("Attempting login...");
+      await signInWithGoogle();
+      setWarning(null);
+    } catch (error: any) {
+      console.error("Login error:", error);
+      if (error.code === 'auth/popup-blocked') {
+        setWarning("Login popup was blocked by your browser. Please allow popups for this site.");
+      } else if (error.code === 'auth/unauthorized-domain') {
+        setWarning(
+          <div className="flex flex-col gap-2">
+            <span>This domain is not authorized for Firebase Authentication.</span>
+            <span className="text-[10px] font-normal">Please add <b>{window.location.hostname}</b> to the "Authorized domains" list in the Firebase Console (Authentication &gt; Settings &gt; Authorized domains).</span>
+          </div>
+        );
+      } else if (error.code === 'auth/operation-not-allowed') {
+        setWarning("Google Sign-In is not enabled in your Firebase project. Please enable it in the Firebase Console (Authentication &gt; Sign-in method).");
+      } else {
+        setWarning(`Login failed: ${error.message} (${error.code})`);
+      }
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -808,17 +1327,99 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#F9FAFB] text-[#111827] font-sans p-4 md:p-12">
+      {/* Sidebar Overlay */}
+      <AnimatePresence>
+        {isSidebarOpen && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsSidebarOpen(false)}
+              className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-[80]"
+            />
+            <motion.div 
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed top-0 left-0 bottom-0 w-64 bg-white z-[90] shadow-2xl border-r border-slate-100 flex flex-col"
+            >
+              <div className="p-6 border-b border-slate-50 flex items-center justify-between">
+                <span className="font-bold text-slate-900 tracking-tight">Menu</span>
+                <button onClick={() => setIsSidebarOpen(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                  <X size={18} className="text-slate-400" />
+                </button>
+              </div>
+
+              <nav className="flex-1 p-4 space-y-1">
+                <button 
+                  onClick={() => { setCurrentView('planner'); setIsSidebarOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm ${currentView === 'planner' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-50'}`}
+                >
+                  <LayoutDashboard size={18} />
+                  Meal Plan
+                </button>
+                <button 
+                  onClick={() => { setCurrentView('archive'); setIsSidebarOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm ${currentView === 'archive' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-50'}`}
+                >
+                  <ArchiveIcon size={18} />
+                  Archive & History
+                </button>
+              </nav>
+
+              <div className="p-6 border-t border-slate-50">
+                {user ? (
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-500">
+                      {user.displayName?.[0]}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold text-slate-900 truncate">{user.displayName}</p>
+                      <button onClick={logout} className="text-[9px] font-bold text-slate-400 uppercase tracking-widest hover:text-red-500 transition-colors">Sign Out</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button 
+                    onClick={handleLogin}
+                    className="w-full py-2.5 bg-slate-900 text-white text-xs font-bold rounded-xl hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
+                  >
+                    <LogIn size={14} />
+                    Login
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <header className="mb-10 flex flex-col md:flex-row md:items-end justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-              Interval
-            </h1>
-            <div className="flex items-center gap-2 text-[11px] font-medium text-slate-400 mt-1 uppercase tracking-wider">
-              <span>{meals.length} meals planned</span>
-              <span>•</span>
-              <span>14-day cooldown active</span>
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setIsSidebarOpen(true)}
+              className="p-2 hover:bg-slate-100 rounded-lg transition-colors text-slate-500"
+            >
+              <Menu size={20} />
+            </button>
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
+                {currentView === 'planner' ? 'Interval' : 'Archive & History'}
+              </h1>
+              <div className="flex items-center gap-2 text-[11px] font-medium text-slate-400 mt-1 uppercase tracking-wider">
+                {currentView === 'planner' ? (
+                  <>
+                    <span>{meals.length} meals planned</span>
+                    <span>•</span>
+                    <span>14-day cooldown active</span>
+                  </>
+                ) : (
+                  <span>Exploring your meal history</span>
+                )}
+              </div>
             </div>
           </div>
           
@@ -838,18 +1439,96 @@ export default function App() {
                 </button>
               </div>
             ) : (
-              <button 
-                onClick={signInWithGoogle}
-                className="text-[11px] font-bold uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-colors"
-              >
-                Login
-              </button>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={handleLogin}
+                  className="text-[11px] font-bold uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-colors"
+                >
+                  Login
+                </button>
+                <button 
+                  onClick={() => setWarning(
+                    <div className="flex flex-col gap-2 p-2">
+                      <span className="font-bold">Login Troubleshooting:</span>
+                      <ul className="list-disc list-inside text-[10px] font-normal flex flex-col gap-1">
+                        <li>Ensure popups are allowed for this site.</li>
+                        <li>Check if <b>{window.location.hostname}</b> is added to "Authorized domains" in Firebase Console.</li>
+                        <li>Verify "Google" is enabled in Firebase Authentication &gt; Sign-in method.</li>
+                      </ul>
+                    </div>
+                  )}
+                  className="p-1 text-slate-300 hover:text-slate-500 transition-colors"
+                  title="Login Help"
+                >
+                  <Info size={14} />
+                </button>
+              </div>
             )}
           </div>
         </header>
 
-        {/* Collaboration Banner */}
-        {/* Collaboration Info (Subtle) */}
+        {currentView === 'planner' ? (
+          <>
+            {/* Search Bar */}
+            <section className="mb-8">
+              <div className="relative group">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-indigo-500 transition-colors" size={18} />
+                <input 
+                  type="text" 
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search your meals..."
+                  className="w-full pl-11 pr-4 py-3 bg-white border border-slate-100 rounded-xl shadow-sm focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all text-sm font-medium"
+                />
+                {searchQuery && (
+                  <button 
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
+
+              <AnimatePresence>
+                {searchQuery.trim() && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="mt-2 bg-white rounded-xl border border-slate-100 shadow-xl overflow-hidden z-20 relative"
+                  >
+                    <div className="max-h-60 overflow-y-auto divide-y divide-slate-50">
+                      {searchResults.map(meal => (
+                        <div key={meal.id} className="p-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                          <div>
+                            <p className="text-xs font-bold text-slate-900">{meal.name}</p>
+                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                              {formatDate(meal.date)} • {meal.type}
+                            </p>
+                          </div>
+                          <button 
+                            onClick={() => {
+                              setNewMealName(meal.name);
+                              setSearchQuery('');
+                            }}
+                            className="p-1.5 text-emerald-500 hover:bg-emerald-50 rounded-lg transition-colors"
+                            title="Reuse this meal"
+                          >
+                            <Plus size={14} />
+                          </button>
+                        </div>
+                      ))}
+                      {searchResults.length === 0 && (
+                        <p className="p-4 text-center text-xs text-slate-400 italic">No matches found</p>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </section>
+
+            {/* Collaboration Info (Subtle) */}
         {user && !householdId && (
           <div className="mb-8 flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100">
             <div className="flex items-center gap-3">
@@ -936,6 +1615,131 @@ export default function App() {
             </div>
           </motion.div>
         )}
+
+          </>
+        ) : (
+          <ArchiveView />
+        )}
+
+        {/* Data Inspector Modal */}
+        <AnimatePresence>
+          {showDataInspector && (
+            <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[80vh] flex flex-col overflow-hidden"
+              >
+                <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-900">Data Inspector</h3>
+                    <p className="text-xs text-slate-500">Total meals in state: {meals.length}</p>
+                  </div>
+                  <button onClick={() => setShowDataInspector(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+                    <X size={24} />
+                  </button>
+                </div>
+                
+                <div className="flex-1 overflow-auto p-6">
+                  <table className="w-full text-left text-sm">
+                    <thead className="text-xs text-slate-400 uppercase tracking-wider">
+                      <tr>
+                        <th className="pb-4 font-bold">Date</th>
+                        <th className="pb-4 font-bold">Type</th>
+                        <th className="pb-4 font-bold">Meal Name</th>
+                        <th className="pb-4 font-bold">ID</th>
+                        <th className="pb-4 font-bold text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {[...meals].sort((a, b) => a.date.localeCompare(b.date)).map(m => (
+                        <tr key={m.id} className="hover:bg-slate-50/50 group">
+                          <td className="py-3 font-medium text-slate-700">{m.date}</td>
+                          <td className="py-3 text-slate-500 capitalize">{m.type}</td>
+                          <td className="py-3 font-semibold text-slate-900">{m.name}</td>
+                          <td className="py-3 text-[10px] font-mono text-slate-400">{m.id}</td>
+                          <td className="py-3 text-right">
+                            <button 
+                              onClick={() => handleRemoveMeal(m.id)}
+                              className="p-1.5 text-slate-300 hover:text-red-500 transition-colors"
+                              title="Delete this specific entry"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                
+                <div className="p-6 border-t border-slate-100 bg-slate-50 text-right">
+                  <button 
+                    onClick={() => setShowDataInspector(false)}
+                    className="px-6 py-2 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 transition-all"
+                  >
+                    Close
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Recipe URL Modal */}
+        <AnimatePresence>
+          {showRecipeUrlModal && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 border border-slate-100"
+              >
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                    <LinkIcon size={20} className="text-emerald-500" />
+                    Recipe Link
+                  </h3>
+                  <button onClick={() => setShowRecipeUrlModal(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                    <X size={24} />
+                  </button>
+                </div>
+                
+                <p className="text-slate-500 mb-6 text-sm">
+                  Add a link to the recipe for <strong>{showRecipeUrlModal.name}</strong>.
+                </p>
+
+                <div className="space-y-4">
+                  <input 
+                    type="url"
+                    value={recipeUrlInput}
+                    onChange={(e) => setRecipeUrlInput(e.target.value)}
+                    placeholder="https://example.com/recipe"
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm"
+                    autoFocus
+                  />
+                  
+                  <div className="flex gap-3">
+                    <button 
+                      onClick={() => setShowRecipeUrlModal(null)}
+                      className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-all"
+                    >
+                      Cancel
+                    </button>
+                    <button 
+                      onClick={handleUpdateRecipeUrl}
+                      className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100"
+                    >
+                      Save Link
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
 
         {/* Recipe Modal */}
         <AnimatePresence>
@@ -1079,6 +1883,73 @@ export default function App() {
           )}
         </AnimatePresence>
 
+        {/* Repair Data (Admin/Debug) */}
+        {user?.email === 'tell.birgit@gmail.com' && (
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-4 flex gap-4 items-center">
+            <button 
+              onClick={async () => {
+                const seen = new Set<string>();
+                const duplicates: string[] = [];
+                const emptyMeals: string[] = [];
+                const invalidDates: string[] = [];
+                
+                meals.forEach(m => {
+                  const key = `${m.date}_${m.type}`;
+                  if (!m.name || !m.name.trim()) {
+                    emptyMeals.push(m.id);
+                  } else if (seen.has(key)) {
+                    duplicates.push(m.id);
+                  } else if (!/^\d{4}-\d{2}-\d{2}$/.test(m.date)) {
+                    invalidDates.push(m.id);
+                  } else {
+                    seen.add(key);
+                  }
+                });
+
+                if (duplicates.length > 0 || emptyMeals.length > 0 || invalidDates.length > 0) {
+                  const msg = [
+                    duplicates.length > 0 ? `Found ${duplicates.length} duplicate entries.` : '',
+                    emptyMeals.length > 0 ? `Found ${emptyMeals.length} empty entries.` : '',
+                    invalidDates.length > 0 ? `Found ${invalidDates.length} entries with invalid dates.` : '',
+                    'Would you like to repair your meal plan data?'
+                  ].filter(Boolean).join('\n');
+
+                  if (window.confirm(msg)) {
+                    const toDelete = [...duplicates, ...emptyMeals, ...invalidDates];
+                    if (householdId && user) {
+                      for (const id of toDelete) {
+                        await deleteDoc(doc(db, 'households', householdId, 'meals', id));
+                      }
+                    } else {
+                      const updatedMeals = meals.filter(m => !toDelete.includes(m.id));
+                      setMeals(updatedMeals);
+                      localStorage.setItem('meal-planner-local-meals', JSON.stringify(updatedMeals));
+                    }
+                    setConflictAlternatives({});
+                    setSuccess(`Repaired ${toDelete.length} entries`);
+                    setTimeout(() => setSuccess(null), 3000);
+                  }
+                } else {
+                  setSuccess("Data is healthy - no duplicates or empty entries found.");
+                  setTimeout(() => setSuccess(null), 3000);
+                }
+              }}
+              className="text-[10px] font-bold text-emerald-400 hover:text-emerald-600 uppercase tracking-widest border border-emerald-100 px-3 py-1 rounded-full transition-colors"
+            >
+              Repair Data
+            </button>
+            <button 
+              onClick={() => setShowDataInspector(true)}
+              className="text-[10px] font-bold text-slate-400 hover:text-slate-600 uppercase tracking-widest border border-slate-100 px-3 py-1 rounded-full transition-colors"
+            >
+              Inspect All Meals ({meals.length})
+            </button>
+            <div className="text-[10px] text-slate-300 italic">
+              Admin: {user.email}
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-start">
           {/* Forecast */}
           <div className="lg:col-span-8">
@@ -1124,67 +1995,113 @@ export default function App() {
                       <div className="w-full grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-8">
                         {/* Lunch */}
                         <div 
-                          className="flex items-center gap-3 relative group/slot"
+                          className={`flex flex-col gap-1 relative group/slot p-2 rounded-lg transition-colors ${activeDropTarget?.date === date && activeDropTarget?.type === 'lunch' ? 'bg-indigo-50 ring-2 ring-indigo-200 ring-inset' : ''}`}
                           onDragOver={onDragOver}
                           onDrop={(e) => onDrop(e, date, 'lunch')}
+                          data-drop-target="true"
+                          data-date={date}
+                          data-type="lunch"
                         >
-                          <div 
-                            draggable={!!lunch}
-                            onDragStart={(e) => lunch && onDragStart(e, lunch)}
-                            onDragEnd={onDragEnd}
-                            className="hidden sm:block opacity-0 group-hover/slot:opacity-100 transition-opacity cursor-grab absolute -left-5"
+                          <motion.div 
+                            className="flex items-center gap-3"
+                            drag={!!lunch}
+                            dragSnapToOrigin
+                            onDragStart={() => lunch && setDraggedMeal({ id: lunch.id, name: lunch.name })}
+                            onDrag={handleTouchDrag}
+                            onDragEnd={(e, info) => lunch && handleTouchDragEnd(e, info, lunch.id)}
+                            whileDrag={{ scale: 1.05, zIndex: 50, opacity: 0.8, pointerEvents: 'none' }}
                           >
-                            <GripVertical size={12} className="text-slate-200" />
-                          </div>
-                          <Sun size={14} className={`${lunch ? 'text-amber-400' : 'text-slate-200'} shrink-0`} />
-                          <input 
-                            type="text"
-                            value={lunch?.name || ''}
-                            onChange={(e) => handleInlineEdit(date, 'lunch', e.target.value)}
-                            placeholder="Lunch..."
-                            className={`flex-1 bg-transparent text-[13px] font-medium outline-none placeholder:text-slate-200 ${lunchConflict ? 'text-amber-600' : 'text-slate-700'}`}
-                          />
-                          {lunch && (
-                            <button 
-                              onClick={() => getRecipe(lunch)}
-                              className="opacity-0 group-hover/slot:opacity-100 p-1 text-slate-300 hover:text-indigo-500 transition-all"
-                            >
-                              <Info size={16} />
-                            </button>
-                          )}
-                          {lunchConflict && (
-                            <div className="flex items-center gap-1 shrink-0">
-                              <span 
-                                className="cursor-help" 
-                                title={`Conflict: "${lunchConflict.name}" on ${formatDate(lunchConflict.date)} (${lunchConflict.type})`}
-                              >
-                                <AlertTriangle size={14} className="text-amber-400" />
-                              </span>
-                              {conflictAlternatives[`${date}_lunch`] ? (
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    onClick={() => handleInlineEdit(date, 'lunch', conflictAlternatives[`${date}_lunch`])}
-                                    className="text-[10px] font-bold text-indigo-500 hover:underline bg-indigo-50 px-1.5 py-0.5 rounded"
-                                    title={`Try ${conflictAlternatives[`${date}_lunch`]} instead?`}
-                                  >
-                                    Try {conflictAlternatives[`${date}_lunch`]}?
-                                  </button>
-                                  <button
-                                    onClick={() => getAlternative({ name: lunch?.name || '', date, type: 'lunch' }, true)}
-                                    className="text-[10px] text-slate-400 hover:text-indigo-500"
-                                    title="Get another suggestion"
-                                  >
-                                    (Another?)
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  onClick={() => getAlternative({ name: lunch?.name || '', date, type: 'lunch' })}
-                                  className="p-1 text-slate-300 hover:text-indigo-500 transition-all"
-                                  title="Get alternative suggestion"
+                            <div className="flex items-center gap-2 flex-1">
+                              <GripVertical size={12} className={`text-slate-200 cursor-grab active:cursor-grabbing ${lunch ? 'opacity-100' : 'opacity-0'}`} />
+                              <Sun size={14} className={`${lunch ? 'text-amber-400' : 'text-slate-200'} shrink-0`} />
+                              <input 
+                                type="text"
+                                value={lunch?.name || ''}
+                                onChange={(e) => handleInlineEdit(date, 'lunch', e.target.value)}
+                                placeholder="Lunch..."
+                                className={`flex-1 bg-transparent text-[13px] font-medium outline-none placeholder:text-slate-200 ${lunchConflict ? 'text-amber-600' : 'text-slate-700'}`}
+                              />
+                            </div>
+                            {lunch && (
+                              <div className="flex items-center gap-1 sm:opacity-0 sm:group-hover/slot:opacity-100 transition-all">
+                                <button 
+                                  onClick={() => getRecipe(lunch)}
+                                  className="p-1 text-slate-400 hover:text-indigo-500 transition-all"
+                                  title="AI Recipe"
                                 >
-                                  <Sparkles size={12} />
+                                  <Info size={16} />
                                 </button>
+                                <button 
+                                  onClick={() => {
+                                    setShowRecipeUrlModal(lunch);
+                                    setRecipeUrlInput(lunch.recipeUrl || '');
+                                  }}
+                                  className={`p-1 transition-all ${lunch.recipeUrl ? 'text-emerald-500 hover:text-emerald-600' : 'text-slate-400 hover:text-emerald-500'}`}
+                                  title={lunch.recipeUrl ? "Open Recipe Link" : "Add Recipe Link"}
+                                >
+                                  <LinkIcon size={16} />
+                                </button>
+                                {lunch.recipeUrl && (
+                                  <a 
+                                    href={lunch.recipeUrl} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer nofollow"
+                                    className="p-1 text-emerald-500 hover:text-emerald-600 transition-all"
+                                  >
+                                    <Share2 size={14} />
+                                  </a>
+                                )}
+                              </div>
+                            )}
+                          </motion.div>
+                          {lunchConflict && (
+                            <div className="pl-6 flex flex-col gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <button 
+                                  onClick={() => setActiveConflictId(activeConflictId === `${date}_lunch` ? null : `${date}_lunch`)}
+                                  className="flex items-center gap-1 hover:bg-amber-50 px-1 rounded transition-colors" 
+                                  title={`Conflict: "${lunchConflict.name}" on ${formatDate(lunchConflict.date)} (${lunchConflict.type})`}
+                                >
+                                  <AlertTriangle size={12} className="text-amber-400" />
+                                  <span className="text-[9px] font-bold text-amber-500 uppercase tracking-tighter">Conflict</span>
+                                </button>
+                                {conflictAlternatives[`${date}_lunch`] ? (
+                                  <div className="flex items-center gap-1 flex-wrap">
+                                    <button
+                                      onClick={() => handleInlineEdit(date, 'lunch', conflictAlternatives[`${date}_lunch`])}
+                                      className="text-[10px] font-bold text-indigo-500 hover:underline bg-indigo-50 px-1.5 py-0.5 rounded whitespace-nowrap"
+                                      title={`Try ${conflictAlternatives[`${date}_lunch`]} instead?`}
+                                    >
+                                      Try {conflictAlternatives[`${date}_lunch`]}?
+                                    </button>
+                                    <button
+                                      onClick={() => getAlternative({ name: lunch?.name || '', date, type: 'lunch' }, true)}
+                                      className={`text-[10px] ${isFetchingAlternative[`${date}_lunch`] ? 'text-slate-300' : 'text-slate-400 hover:text-indigo-500'}`}
+                                      title="Get another suggestion"
+                                      disabled={isFetchingAlternative[`${date}_lunch`]}
+                                    >
+                                      {isFetchingAlternative[`${date}_lunch`] ? '...' : '(Another?)'}
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={() => getAlternative({ name: lunch?.name || '', date, type: 'lunch' })}
+                                    className="flex items-center gap-1 text-[10px] font-bold text-indigo-400 hover:text-indigo-600 transition-all"
+                                    title="Get alternative suggestion"
+                                  >
+                                    <Sparkles size={10} />
+                                    <span>Suggest Alternative</span>
+                                  </button>
+                                )}
+                              </div>
+                              {activeConflictId === `${date}_lunch` && (
+                                <motion.div 
+                                  initial={{ opacity: 0, height: 0 }}
+                                  animate={{ opacity: 1, height: 'auto' }}
+                                  className="bg-amber-50/50 border border-amber-100 rounded-lg p-2 text-[10px] text-amber-700 leading-tight"
+                                >
+                                  Same meal planned for <strong>{formatDate(lunchConflict.date)}</strong> ({lunchConflict.type}).
+                                </motion.div>
                               )}
                             </div>
                           )}
@@ -1192,67 +2109,113 @@ export default function App() {
 
                         {/* Dinner */}
                         <div 
-                          className="flex items-center gap-3 relative group/slot"
+                          className={`flex flex-col gap-1 relative group/slot p-2 rounded-lg transition-colors ${activeDropTarget?.date === date && activeDropTarget?.type === 'dinner' ? 'bg-indigo-50 ring-2 ring-indigo-200 ring-inset' : ''}`}
                           onDragOver={onDragOver}
                           onDrop={(e) => onDrop(e, date, 'dinner')}
+                          data-drop-target="true"
+                          data-date={date}
+                          data-type="dinner"
                         >
-                          <div 
-                            draggable={!!dinner}
-                            onDragStart={(e) => dinner && onDragStart(e, dinner)}
-                            onDragEnd={onDragEnd}
-                            className="hidden sm:block opacity-0 group-hover/slot:opacity-100 transition-opacity cursor-grab absolute -left-5"
+                          <motion.div 
+                            className="flex items-center gap-3"
+                            drag={!!dinner}
+                            dragSnapToOrigin
+                            onDragStart={() => dinner && setDraggedMeal({ id: dinner.id, name: dinner.name })}
+                            onDrag={handleTouchDrag}
+                            onDragEnd={(e, info) => dinner && handleTouchDragEnd(e, info, dinner.id)}
+                            whileDrag={{ scale: 1.05, zIndex: 50, opacity: 0.8, pointerEvents: 'none' }}
                           >
-                            <GripVertical size={12} className="text-slate-200" />
-                          </div>
-                          <Moon size={14} className={`${dinner ? 'text-indigo-400' : 'text-slate-200'} shrink-0`} />
-                          <input 
-                            type="text"
-                            value={dinner?.name || ''}
-                            onChange={(e) => handleInlineEdit(date, 'dinner', e.target.value)}
-                            placeholder="Dinner..."
-                            className={`flex-1 bg-transparent text-[13px] font-medium outline-none placeholder:text-slate-200 ${dinnerConflict ? 'text-amber-600' : 'text-slate-700'}`}
-                          />
-                          {dinner && (
-                            <button 
-                              onClick={() => getRecipe(dinner)}
-                              className="opacity-0 group-hover/slot:opacity-100 p-1 text-slate-300 hover:text-indigo-500 transition-all"
-                            >
-                              <Info size={16} />
-                            </button>
-                          )}
-                          {dinnerConflict && (
-                            <div className="flex items-center gap-1 shrink-0">
-                              <span 
-                                className="cursor-help" 
-                                title={`Conflict: "${dinnerConflict.name}" on ${formatDate(dinnerConflict.date)} (${dinnerConflict.type})`}
-                              >
-                                <AlertTriangle size={14} className="text-amber-400" />
-                              </span>
-                              {conflictAlternatives[`${date}_dinner`] ? (
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    onClick={() => handleInlineEdit(date, 'dinner', conflictAlternatives[`${date}_dinner`])}
-                                    className="text-[10px] font-bold text-indigo-500 hover:underline bg-indigo-50 px-1.5 py-0.5 rounded"
-                                    title={`Try ${conflictAlternatives[`${date}_dinner`]} instead?`}
-                                  >
-                                    Try {conflictAlternatives[`${date}_dinner`]}?
-                                  </button>
-                                  <button
-                                    onClick={() => getAlternative({ name: dinner?.name || '', date, type: 'dinner' }, true)}
-                                    className="text-[10px] text-slate-400 hover:text-indigo-500"
-                                    title="Get another suggestion"
-                                  >
-                                    (Another?)
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  onClick={() => getAlternative({ name: dinner?.name || '', date, type: 'dinner' })}
-                                  className="p-1 text-slate-300 hover:text-indigo-500 transition-all"
-                                  title="Get alternative suggestion"
+                            <div className="flex items-center gap-2 flex-1">
+                              <GripVertical size={12} className={`text-slate-200 cursor-grab active:cursor-grabbing ${dinner ? 'opacity-100' : 'opacity-0'}`} />
+                              <Moon size={14} className={`${dinner ? 'text-indigo-400' : 'text-slate-200'} shrink-0`} />
+                              <input 
+                                type="text"
+                                value={dinner?.name || ''}
+                                onChange={(e) => handleInlineEdit(date, 'dinner', e.target.value)}
+                                placeholder="Dinner..."
+                                className={`flex-1 bg-transparent text-[13px] font-medium outline-none placeholder:text-slate-200 ${dinnerConflict ? 'text-amber-600' : 'text-slate-700'}`}
+                              />
+                            </div>
+                            {dinner && (
+                              <div className="flex items-center gap-1 sm:opacity-0 sm:group-hover/slot:opacity-100 transition-all">
+                                <button 
+                                  onClick={() => getRecipe(dinner)}
+                                  className="p-1 text-slate-400 hover:text-indigo-500 transition-all"
+                                  title="AI Recipe"
                                 >
-                                  <Sparkles size={12} />
+                                  <Info size={16} />
                                 </button>
+                                <button 
+                                  onClick={() => {
+                                    setShowRecipeUrlModal(dinner);
+                                    setRecipeUrlInput(dinner.recipeUrl || '');
+                                  }}
+                                  className={`p-1 transition-all ${dinner.recipeUrl ? 'text-emerald-500 hover:text-emerald-600' : 'text-slate-300 hover:text-emerald-500'}`}
+                                  title={dinner.recipeUrl ? "Open Recipe Link" : "Add Recipe Link"}
+                                >
+                                  <LinkIcon size={16} />
+                                </button>
+                                {dinner.recipeUrl && (
+                                  <a 
+                                    href={dinner.recipeUrl} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer nofollow"
+                                    className="p-1 text-emerald-500 hover:text-emerald-600 transition-all"
+                                  >
+                                    <Share2 size={14} />
+                                  </a>
+                                )}
+                              </div>
+                            )}
+                          </motion.div>
+                          {dinnerConflict && (
+                            <div className="pl-6 flex flex-col gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <button 
+                                  onClick={() => setActiveConflictId(activeConflictId === `${date}_dinner` ? null : `${date}_dinner`)}
+                                  className="flex items-center gap-1 hover:bg-amber-50 px-1 rounded transition-colors" 
+                                  title={`Conflict: "${dinnerConflict.name}" on ${formatDate(dinnerConflict.date)} (${dinnerConflict.type})`}
+                                >
+                                  <AlertTriangle size={12} className="text-amber-400" />
+                                  <span className="text-[9px] font-bold text-amber-500 uppercase tracking-tighter">Conflict</span>
+                                </button>
+                                {conflictAlternatives[`${date}_dinner`] ? (
+                                  <div className="flex items-center gap-1 flex-wrap">
+                                    <button
+                                      onClick={() => handleInlineEdit(date, 'dinner', conflictAlternatives[`${date}_dinner`])}
+                                      className="text-[10px] font-bold text-indigo-500 hover:underline bg-indigo-50 px-1.5 py-0.5 rounded whitespace-nowrap"
+                                      title={`Try ${conflictAlternatives[`${date}_dinner`]} instead?`}
+                                    >
+                                      Try {conflictAlternatives[`${date}_dinner`]}?
+                                    </button>
+                                    <button
+                                      onClick={() => getAlternative({ name: dinner?.name || '', date, type: 'dinner' }, true)}
+                                      className={`text-[10px] ${isFetchingAlternative[`${date}_dinner`] ? 'text-slate-300' : 'text-slate-400 hover:text-indigo-500'}`}
+                                      title="Get another suggestion"
+                                      disabled={isFetchingAlternative[`${date}_dinner`]}
+                                    >
+                                      {isFetchingAlternative[`${date}_dinner`] ? '...' : '(Another?)'}
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={() => getAlternative({ name: dinner?.name || '', date, type: 'dinner' })}
+                                    className="flex items-center gap-1 text-[10px] font-bold text-indigo-400 hover:text-indigo-600 transition-all"
+                                    title="Get alternative suggestion"
+                                  >
+                                    <Sparkles size={10} />
+                                    <span>Suggest Alternative</span>
+                                  </button>
+                                )}
+                              </div>
+                              {activeConflictId === `${date}_dinner` && (
+                                <motion.div 
+                                  initial={{ opacity: 0, height: 0 }}
+                                  animate={{ opacity: 1, height: 'auto' }}
+                                  className="bg-amber-50/50 border border-amber-100 rounded-lg p-2 text-[10px] text-amber-700 leading-tight"
+                                >
+                                  Same meal planned for <strong>{formatDate(dinnerConflict.date)}</strong> ({dinnerConflict.type}).
+                                </motion.div>
                               )}
                             </div>
                           )}
@@ -1285,23 +2248,26 @@ export default function App() {
               
               <div className="space-y-1 mb-8">
                 {pantry.map((item) => (
-                  <div 
+                  <motion.div 
                     key={item} 
-                    className="flex items-center justify-between group py-1.5"
-                    draggable
-                    onDragStart={(e) => onDragStartPantry(e, item)}
+                    className="flex items-center justify-between group py-1.5 bg-white"
+                    drag
+                    dragSnapToOrigin
+                    onDrag={handleTouchDrag}
+                    onDragEnd={(e, info) => handleTouchDragEndPantry(e, info, item)}
+                    whileDrag={{ scale: 1.1, zIndex: 50, opacity: 0.8, pointerEvents: 'none' }}
                   >
                     <div className="flex items-center gap-3">
-                      <GripVertical size={12} className="text-slate-200 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab" />
+                      <GripVertical size={12} className="text-slate-200 opacity-100 transition-opacity cursor-grab active:cursor-grabbing" />
                       <span className="text-[13px] font-medium text-slate-600">{item}</span>
                     </div>
                     <button 
                       onClick={() => handleRemovePantry(item)}
-                      className="opacity-0 group-hover:opacity-100 p-1 text-slate-300 hover:text-red-400 transition-all"
+                      className="sm:opacity-0 sm:group-hover:opacity-100 p-1 text-slate-400 hover:text-red-400 transition-all"
                     >
                       <X size={12} />
                     </button>
-                  </div>
+                  </motion.div>
                 ))}
               </div>
 

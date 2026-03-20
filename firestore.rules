@@ -25,7 +25,8 @@ service cloud.firestore {
              data.date is string && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$') &&
              data.type in ['lunch', 'dinner'] &&
              data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
-             data.updatedBy == request.auth.uid;
+             data.updatedBy == request.auth.uid &&
+             (!('recipeUrl' in data) || (data.recipeUrl is string && data.recipeUrl.size() < 1000));
     }
 
     // Households

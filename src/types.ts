@@ -5,4 +5,5 @@ export interface MealEntry {
   date: string; // ISO string YYYY-MM-DD
   type: MealType;
   name: string;
+  recipeUrl?: string;
 }

@@ -48,6 +48,11 @@
           "type": "string",
           "format": "date-time",
           "description": "Timestamp of the last update."
+        },
+        "recipeUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Optional URL for the meal's recipe."
         }
       },
       "required": ["date", "type", "name", "updatedBy", "updatedAt"]
