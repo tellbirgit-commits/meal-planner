@@ -29,7 +29,8 @@ import {
   History as HistoryIcon,
   Archive as ArchiveIcon,
   LayoutDashboard,
-  Search
+  Search,
+  ChevronDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
@@ -110,10 +111,11 @@ const handleFirestoreError = (error: unknown, operationType: OperationType, path
 
 const getDaysArray = (days: number) => {
   const arr = [];
-  const today = new Date();
+  const start = new Date();
+  start.setDate(start.getDate() - 3); // Start 3 days ago
   for (let i = 0; i < days; i++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() + i);
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
     arr.push(d.toISOString().split('T')[0]);
   }
   return arr;
@@ -180,8 +182,9 @@ export default function App() {
   const [currentView, setCurrentView] = useState<'planner' | 'archive'>('planner');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [visibleDays, setVisibleDays] = useState(120);
 
-  const days = useMemo(() => getDaysArray(60), []);
+  const days = useMemo(() => getDaysArray(visibleDays), [visibleDays]);
   const ai = useMemo(() => new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }), []);
 
   const searchResults = useMemo(() => {
@@ -1414,7 +1417,12 @@ export default function App() {
                   <>
                     <span>{meals.length} meals planned</span>
                     <span>•</span>
-                    <span>14-day cooldown active</span>
+                    <button 
+                      onClick={() => document.getElementById('today-slot')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                      className="hover:text-indigo-500 transition-colors"
+                    >
+                      Jump to Today
+                    </button>
                   </>
                 ) : (
                   <span>Exploring your meal history</span>
@@ -1978,6 +1986,7 @@ export default function App() {
                   acc.push(
                     <div 
                       key={date} 
+                      id={isToday ? 'today-slot' : undefined}
                       className={`flex flex-col sm:flex-row items-start sm:items-center gap-4 px-4 sm:px-6 py-4 sm:py-3 group transition-colors ${isToday ? 'bg-emerald-50/10' : 'hover:bg-slate-50/30'}`}
                     >
                       {/* Date Info */}
@@ -2225,6 +2234,17 @@ export default function App() {
                   );
                   return acc;
                 }, [])}
+                
+                {/* Load More Button */}
+                <div className="p-8 flex justify-center bg-slate-50/30">
+                  <button 
+                    onClick={() => setVisibleDays(prev => prev + 60)}
+                    className="flex items-center gap-2 px-6 py-3 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:text-indigo-600 hover:border-indigo-200 hover:shadow-md transition-all group"
+                  >
+                    <ChevronDown size={16} className="group-hover:translate-y-0.5 transition-transform" />
+                    Load More Days
+                  </button>
+                </div>
               </div>
             </div>
           </div>
